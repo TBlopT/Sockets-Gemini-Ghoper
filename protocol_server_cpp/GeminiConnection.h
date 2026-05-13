@@ -2,10 +2,11 @@
 #define GEMINICONNECTION_H
 
 #include <string>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
 
-const int MAX_URL_SIZE = 1024;  // Gemini spec: URLs must not exceed 1024 bytes
+const int MAX_URL_SIZE = 1024;
 
-// Gemini status codes
 namespace GeminiStatus {
     const int INPUT = 10;
     const int SUCCESS = 20;
@@ -31,31 +32,24 @@ public:
     GeminiConnection(int socket, bool use_tls = false);
     ~GeminiConnection();
 
-    // Handle a Gemini request
     void handle_request();
 
 private:
     int socket_fd;
     bool use_tls;
-    void *tls_context;  // For TLS implementation (optional)
     
-    // Read the URL from the client
+    SSL_CTX *ctx;
+    SSL *ssl;
+    
+
+    int my_recv(char* buf, int len);
+    int my_send(const char* buf, int len);
+    
     std::string read_url();
-    
-    // Parse a Gemini URL and extract the path
     std::string parse_url_path(const std::string& url);
-    
-    // Send a response header
     void send_header(int status, const std::string& meta);
-    
-    // Send a file to the client
     void send_file(const std::string& path);
-    
-    // Send a directory listing in gemtext format
     void send_directory(const std::string& path);
-    
-    // Convert filesystem path to URL path for links
-    std::string path_to_url(const std::string& path);
 };
 
 #endif

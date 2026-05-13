@@ -20,7 +20,6 @@
 #include "GopherServer.h"
 #include "GopherConnection.h"
 
-// Thread function for handling client connections
 void *run_gopher_connection(void *c) {
     GopherConnection *connection = (GopherConnection *) c;
     connection->handle_request();
@@ -40,7 +39,6 @@ void GopherServer::run() {
     int client_socket;
     socklen_t addr_len = sizeof(client_addr);
     
-    // Create and bind the socket
     std::pair<int, int> result = define_socket_TCP(port);
     msock = result.first;
     port = result.second;
@@ -51,7 +49,6 @@ void GopherServer::run() {
 
     std::cout << "Gopher server listening on port " << port << std::endl;
 
-    // Accept loop
     while (!should_stop) {
         client_socket = accept(msock, (struct sockaddr *) &client_addr, &addr_len);
         
@@ -60,13 +57,11 @@ void GopherServer::run() {
             std::cerr << "Accept failed: " << strerror(errno) << std::endl;
             continue;
         }
+
+        auto *connection = new GopherConnection(client_socket, port);
         
-        // Create a new connection handler
-        auto *connection = new GopherConnection(client_socket);
-        
-        // Create a thread to handle this connection
         pthread_t thread;
         pthread_create(&thread, nullptr, run_gopher_connection, (void *) connection);
-        pthread_detach(thread);  // Detach so thread cleans up automatically
+        pthread_detach(thread); 
     }
 }

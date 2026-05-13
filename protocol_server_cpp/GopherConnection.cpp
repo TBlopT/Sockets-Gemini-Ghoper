@@ -1,11 +1,5 @@
 //****************************************************************************
-//                         REDES Y SISTEMAS DISTRIBUIDOS
-//                      
-//                     2º de grado de Ingeniería Informática
-//                       
 //                   Gopher Protocol Connection Handler
-//                   RFC 1436
-// 
 //****************************************************************************
 
 #include <cstring>
@@ -18,84 +12,108 @@
 #include <sys/socket.h>
 #include "common.h"
 
-GopherConnection::GopherConnection(int socket) : socket_fd(socket) {
+
+GopherConnection::GopherConnection(int socket, int server_port) : socket_fd(socket), port(server_port) {
 }
 
 GopherConnection::~GopherConnection() {
     close(socket_fd);
 }
 
-// TODO: Students must implement this function
-// Read the selector string from the client
-// The selector is terminated by CR+LF (\r\n)
-// Maximum selector size is MAX_SELECTOR_SIZE
 std::string GopherConnection::read_selector() {
-    // TODO: Read from socket_fd until \r\n is found
-    // TODO: Return the selector string (without \r\n)
-    // TODO: Handle errors and buffer overflow
-    
-    return "";  // Replace with actual implementation
+    std::string selector;
+    char c;
+    int bytes;
+ 
+    while (selector.size() < MAX_SELECTOR_SIZE) {
+        bytes = recv(socket_fd, &c, 1, 0);
+        if (bytes <= 0) break;
+        if (c == '\r') {
+            recv(socket_fd, &c, 1, 0); // Consume \n
+            break;
+        }
+        if (c == '\n') break;
+        selector += c;
+    }
+    return selector;
 }
 
-// TODO: Students must implement this function
-// Convert a Gopher selector to a filesystem path
-// For example: "/" -> ".", "/file.txt" -> "./file.txt"
-// Must ensure the path is safe (no directory traversal)
 std::string GopherConnection::selector_to_path(const std::string& selector) {
-    // TODO: Validate selector using is_safe_path()
-    // TODO: Convert selector to filesystem path
-    // TODO: Handle empty selector (should map to current directory)
-    
-    return "";  // Replace with actual implementation
+    if (selector.empty() || selector == "/") return ".";
+    return "." + selector;
 }
 
-// TODO: Students must implement this function
-// Send a file to the client
-// The file content is sent as-is, followed by closing the connection
 void GopherConnection::send_file(const std::string& path) {
-    // TODO: Open the file
-    // TODO: Read file in chunks and send via socket
-    // TODO: Handle errors (file not found, read errors, etc.)
-    // TODO: Close file when done
+    std::ifstream file(path, std::ios::binary);
+    if (!file.is_open()) {
+        send_error("Could not open file");
+        return;
+    }
+ 
+    char buf[4096];
+    while (file.read(buf, sizeof(buf)) || file.gcount() > 0) {
+        std::streamsize n = file.gcount();
+        ssize_t sent = 0;
+        while (sent < n) {
+            ssize_t r = send(socket_fd, buf + sent, n - sent, 0);
+            if (r <= 0) return;
+            sent += r;
+        }
+    }
+    file.close();
 }
 
-// TODO: Students must implement this function
-// Send a directory listing in Gopher menu format
-// Format: <type><display_string><TAB><selector><TAB><host><TAB><port><CR><LF>
-// Example: 0README.txt<TAB>/README.txt<TAB>localhost<TAB>7070<CR><LF>
 void GopherConnection::send_directory(const std::string& path) {
-    // TODO: Open directory using opendir()
-    // TODO: Read directory entries using readdir()
-    // TODO: For each entry:
-    //       - Determine Gopher type using get_gopher_type()
-    //       - Format menu line: type + name + TAB + selector + TAB + host + TAB + port + CRLF
-    //       - Send line to client
-    // TODO: Send terminating line: ".<CR><LF>"
-    // TODO: Close directory
+    DIR *dir = opendir(path.c_str());
+    if (!dir) {
+        send_error("Could not open directory");
+        return;
+    }
+ 
+    std::string selector_base = (path == "." ? "" : path.substr(1));
+    std::string host = "localhost";
+    std::string port_str = std::to_string(port);
+ 
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != nullptr) {
+        std::string name = entry->d_name;
+        if (name == "." || name == "..") continue;
+ 
+        std::string full_path = path + "/" + name;
+        bool is_dir = is_directory(full_path);
+        
+        char type = get_gopher_type(name, is_dir);
+        std::string selector = selector_base + "/" + name;
+        std::string display = name; // Sin barra final en Gopher!
+ 
+        std::string line = std::string(1, type) + display + "\t" + selector + "\t" + host + "\t" + port_str + "\r\n";
+        send(socket_fd, line.c_str(), line.length(), 0);
+    }
+    closedir(dir);
+    
+    const char *term = ".\r\n";
+    send(socket_fd, term, strlen(term), 0);
 }
 
-// Send an error message in Gopher format
-// Error type is '3'
 void GopherConnection::send_error(const std::string& message) {
-    std::string error_line = "3" + message + "\terror\terror\t0\r\n";
+    std::string error_line = "3" + message + "\terror\tlocalhost\t0\r\n";
     send(socket_fd, error_line.c_str(), error_line.length(), 0);
 }
 
-// Main request handler
 void GopherConnection::handle_request() {
-    // Read the selector from the client
     std::string selector = read_selector();
+
+    if (!selector.empty() && selector[0] != '/') {
+        selector = "/" + selector;
+    }
     
-    // Validate the selector
     if (!is_safe_path(selector)) {
         send_error("Invalid selector");
         return;
     }
     
-    // Convert selector to filesystem path
     std::string path = selector_to_path(selector);
     
-    // Check if path exists and determine type
     if (is_directory(path)) {
         send_directory(path);
     } else if (is_regular_file(path)) {
